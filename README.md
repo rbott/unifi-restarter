@@ -1,3 +1,3 @@
 # Unifi AP Restarter
 
-Simple Python Script to restart Unif Accesspoints via Unifi Controller based on their uptime.
+Simple Python Script to restart Unifi Accesspoints via Unifi Controller API based on their uptime.
