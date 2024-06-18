@@ -19,11 +19,13 @@ class AP:
     def __repr__(self):
         return f"{self.name} ({self.mac})"
 
+
 def parse_args() -> argparse.Namespace:
     args = argparse.ArgumentParser()
     args.add_argument("--host", help="Unifi controller hostname (optionally suffixed with :port)", type=str, required=True)
     args.add_argument("--user", help="Unifi console username", type=str, required=True)
     args.add_argument("--password", help="Unifi console password", type=str, required=True)
+    args.add_argument("--list-sites", help="List all known sites and exit", action="store_true", default=False)
     args.add_argument("--site", help="Unifi site name (default: 'default')", type=str, default="default")
     args.add_argument("--uptime-limit", help="Restart accesspoints after this amount of days (default: 50)", type=int, default=50)
     args.add_argument("--batch-size", help="Restart this amount of accesspoints per script invocation (default: 5)", type=int, default=5)
@@ -50,6 +52,7 @@ def get_aps(client: unificontrol.UnifiClient, restart_day_limit: int, restart_ba
     print(f"Good: {uaps_good}")
     return (uaps_good, uaps_overdue)
 
+
 def restart_batch(client: unificontrol.UnifiClient, uaps_overdue: List[AP], restart_batch_size: int, dry_run: Boolean) -> None:
     uap_restart_batch = uaps_overdue[:restart_batch_size]
     print(f"Selected the following APs for restart in this round: {uap_restart_batch}")
@@ -60,10 +63,21 @@ def restart_batch(client: unificontrol.UnifiClient, uaps_overdue: List[AP], rest
             print(f" Restarting AP {ap}")
             client.restart_ap(ap.mac)
 
+
+def list_sites(client: unificontrol.UnifiClient) -> None:
+    print("Listing all sites known to the controller:")
+    for site in client.list_sites():
+        print(f" - {site['desc']} (ID: {site['name']})")
+
+
 def main():
     args = parse_args()
     
     client = unificontrol.UnifiClient(host=args.host, username=args.user, password=args.password, site=args.site)
+
+    if args.list_sites:
+        list_sites(client)
+        sys.exit(0)
 
     _, uaps_overdue = get_aps(client, args.uptime_limit, args.batch_size)
 
