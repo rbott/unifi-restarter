@@ -5,6 +5,7 @@ from xmlrpc.client import Boolean
 import unificontrol
 import sys
 import argparse
+from slack_webhook import Slack
 from typing import List, Tuple
 
 class AP:
@@ -22,13 +23,15 @@ class AP:
 
 def parse_args() -> argparse.Namespace:
     args = argparse.ArgumentParser()
-    args.add_argument("--host", help="Unifi controller hostname (optionally suffixed with :port)", type=str, required=True)
+    args.add_argument("--host", help="Unifi controller hostname", type=str, required=True)
+    args.add_argument("--port", help="Unifi controller port (default: 8443)", type=int, default=8443)
     args.add_argument("--user", help="Unifi console username", type=str, required=True)
     args.add_argument("--password", help="Unifi console password", type=str, required=True)
     args.add_argument("--list-sites", help="List all known sites and exit", action="store_true", default=False)
     args.add_argument("--site", help="Unifi site name (default: 'default')", type=str, default="default")
     args.add_argument("--uptime-limit", help="Restart accesspoints after this amount of days (default: 50)", type=int, default=50)
     args.add_argument("--batch-size", help="Restart this amount of accesspoints per script invocation (default: 5)", type=int, default=5)
+    args.add_argument("--slack-webhook", help="Slack Webhook URL - enables output to slack channels", required=False, default=None)
     args.add_argument("--dry-run", help="Do not actually restart anything", action="store_true", default=False)
     return args.parse_args()
 
@@ -53,9 +56,14 @@ def get_aps(client: unificontrol.UnifiClient, restart_day_limit: int, restart_ba
     return (uaps_good, uaps_overdue)
 
 
-def restart_batch(client: unificontrol.UnifiClient, uaps_overdue: List[AP], restart_batch_size: int, dry_run: Boolean) -> None:
+def restart_batch(client: unificontrol.UnifiClient, uaps_overdue: List[AP], restart_batch_size: int, dry_run: Boolean, slack_webhook: str) -> None:
     uap_restart_batch = uaps_overdue[:restart_batch_size]
-    print(f"Selected the following APs for restart in this round: {uap_restart_batch}")
+    msg = f"Selected the following APs for restart in this round: {uap_restart_batch}"
+    print(msg)
+    if slack_webhook:
+        print("Sending restart summary message to Slack")
+        slack = Slack(url=slack_webhook)
+        slack.post(text=msg)
     for ap in uap_restart_batch:
         if dry_run:
             print(f" Not Restarting AP {ap} (dry-run mode)")
@@ -73,19 +81,27 @@ def list_sites(client: unificontrol.UnifiClient) -> None:
 def main():
     args = parse_args()
     
-    client = unificontrol.UnifiClient(host=args.host, username=args.user, password=args.password, site=args.site)
+    try:
+        client = unificontrol.UnifiClient(host=args.host, port=args.port, username=args.user, password=args.password, site=args.site)
 
-    if args.list_sites:
-        list_sites(client)
-        sys.exit(0)
+        if args.list_sites:
+            list_sites(client)
+            sys.exit(0)
 
-    _, uaps_overdue = get_aps(client, args.uptime_limit, args.batch_size)
+        _, uaps_overdue = get_aps(client, args.uptime_limit, args.batch_size)
 
-    if not uaps_overdue:
-        print("Everything is fine, not restarting anything today. Good-Bye!")
-        sys.exit(0)
+        if not uaps_overdue:
+            print("Everything is fine, not restarting anything today. Good-Bye!")
+            sys.exit(0)
 
-    restart_batch(client, uaps_overdue, args.batch_size, args.dry_run)
+        restart_batch(client, uaps_overdue, args.batch_size, args.dry_run, args.slack_webhook)
+    except Exception as e:
+        print(f"{type(e).__name__}: {e}")
+        if args.slack_webhook:
+            print("Posting error message to slack")
+            slack = Slack(url=args.slack_webhook)
+            slack.post(text=f"Error Running unifi-restarter.py:\n{type(e).__name__}: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
